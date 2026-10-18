@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { demoBeats, demoLicenses } from "./demo-data";
 import type { Beat, License } from "./types";
 
@@ -39,6 +39,7 @@ type LicenseRow = {
 export async function getBeats(): Promise<Beat[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("catalog");
 
   const db = supabase();
   if (!db) return demoBeats;
@@ -72,6 +73,7 @@ export async function getBeats(): Promise<Beat[]> {
 export async function getLicenses(): Promise<License[]> {
   "use cache";
   cacheLife("minutes");
+  cacheTag("catalog");
 
   const db = supabase();
   if (!db) return demoLicenses;
