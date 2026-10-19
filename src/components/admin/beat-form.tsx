@@ -1,9 +1,11 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { refreshCatalog } from "@/app/actions";
 import {
+  type Bucket,
+  displayName,
   MAX_UPLOAD_BYTES,
   pathFromPublicUrl,
   publicUrl,
@@ -33,13 +35,24 @@ type Existing = {
 
 type FileKey = "cover" | "preview" | "mp3" | "wav" | "stems";
 
-const FILE_FIELDS: { key: FileKey; label: string; accept: string; hint: string }[] = [
-  { key: "preview", label: "Prévia (com tag de voz)", accept: "audio/mpeg,.mp3", hint: "MP3 público que toca no site." },
-  { key: "cover", label: "Capa", accept: "image/*", hint: "Imagem quadrada (ex: 1000×1000). Opcional." },
-  { key: "mp3", label: "MP3 sem tag", accept: "audio/mpeg,.mp3", hint: "Entregue na licença Básica." },
-  { key: "wav", label: "WAV", accept: "audio/wav,.wav", hint: "Entregue na Premium em diante." },
-  { key: "stems", label: "Stems (.zip)", accept: ".zip,application/zip", hint: "Entregue na Trackout/Exclusiva." },
+type FileField = { key: FileKey; bucket: Bucket; label: string; accept: string; hint: string; required?: boolean };
+
+const FILE_FIELDS: FileField[] = [
+  { key: "preview", bucket: "previews", label: "Prévia (com tag de voz)", accept: "audio/mpeg,.mp3", hint: "MP3 público que toca no site.", required: true },
+  { key: "cover", bucket: "covers", label: "Capa", accept: "image/*", hint: "Imagem quadrada (ex: 1000×1000). Opcional." },
+  { key: "mp3", bucket: "masters", label: "MP3 sem tag", accept: "audio/mpeg,.mp3", hint: "Entregue na licença Básica." },
+  { key: "wav", bucket: "masters", label: "WAV", accept: "audio/wav,.wav", hint: "Entregue na Premium em diante." },
+  { key: "stems", bucket: "masters", label: "Stems (.zip)", accept: ".zip,application/zip", hint: "Entregue na Trackout/Exclusiva." },
 ];
+
+// Coluna do banco onde cada arquivo fica salvo.
+const COLUMN: Record<FileKey, "cover_url" | "preview_url" | "mp3_path" | "wav_path" | "stems_path"> = {
+  cover: "cover_url",
+  preview: "preview_url",
+  mp3: "mp3_path",
+  wav: "wav_path",
+  stems: "stems_path",
+};
 
 const splitList = (s: string) =>
   s
@@ -59,6 +72,7 @@ export function BeatForm({ beatId }: { beatId?: string }) {
   const [tags, setTags] = useState("");
   const [published, setPublished] = useState(true);
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({});
+  const [removed, setRemoved] = useState<Partial<Record<FileKey, boolean>>>({});
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -83,13 +97,11 @@ export function BeatForm({ beatId }: { beatId?: string }) {
       });
   }, [beatId]);
 
-  const currentFile: Record<FileKey, string | null> = {
-    cover: existing?.cover_url ?? null,
-    preview: existing?.preview_url ?? null,
-    mp3: existing?.mp3_path ?? null,
-    wav: existing?.wav_path ?? null,
-    stems: existing?.stems_path ?? null,
-  };
+  /** Caminho do arquivo salvo no bucket (as colunas públicas guardam a URL). */
+  function storedPath({ key, bucket }: FileField) {
+    const value = existing?.[COLUMN[key]] ?? null;
+    return bucket === "masters" ? value : pathFromPublicUrl(bucket, value);
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -97,22 +109,35 @@ export function BeatForm({ beatId }: { beatId?: string }) {
 
     const tooBig = Object.values(files).find((f) => f.size > MAX_UPLOAD_BYTES);
     if (tooBig) return setError(`"${tooBig.name}" passa de 50 MB (limite do plano grátis do Supabase).`);
-    if (!existing && !files.preview) return setError("Envie a prévia em MP3.");
+
+    const missingRequired = FILE_FIELDS.find(
+      (f) => f.required && !files[f.key] && (!existing || removed[f.key]),
+    );
+    if (missingRequired) return setError(`${missingRequired.label} é obrigatória.`);
 
     const slug = existing?.slug ?? slugify(title);
     if (!slug) return setError("Dê um título ao beat.");
 
+    const uploaded: Partial<Record<FileKey, string>> = {};
+    let saved = false;
     try {
-      const uploaded: Partial<Record<FileKey, string>> = {};
-      for (const { key, label } of FILE_FIELDS) {
+      for (const { key, bucket, label } of FILE_FIELDS) {
         const file = files[key];
         if (!file) continue;
         setStatus(`Enviando ${label.toLowerCase()}…`);
-        const bucket = key === "cover" ? "covers" : key === "preview" ? "previews" : "masters";
         uploaded[key] = await uploadFile(bucket, slug, key, file);
       }
 
       setStatus("Salvando…");
+      const fileColumns: Record<string, string | null> = {};
+      for (const { key, bucket } of FILE_FIELDS) {
+        if (uploaded[key]) {
+          fileColumns[COLUMN[key]] = bucket === "masters" ? uploaded[key] : publicUrl(bucket, uploaded[key]);
+        } else if (removed[key]) {
+          fileColumns[COLUMN[key]] = null;
+        }
+      }
+
       const row = {
         slug,
         title: title.trim(),
@@ -122,11 +147,7 @@ export function BeatForm({ beatId }: { beatId?: string }) {
         moods: splitList(moods),
         tags: splitList(tags).map((t) => t.replace(/^#/, "").toLowerCase()),
         published,
-        ...(uploaded.cover && { cover_url: publicUrl("covers", uploaded.cover) }),
-        ...(uploaded.preview && { preview_url: publicUrl("previews", uploaded.preview) }),
-        ...(uploaded.mp3 && { mp3_path: uploaded.mp3 }),
-        ...(uploaded.wav && { wav_path: uploaded.wav }),
-        ...(uploaded.stems && { stems_path: uploaded.stems }),
+        ...fileColumns,
       };
 
       const { error } = existing
@@ -137,23 +158,28 @@ export function BeatForm({ beatId }: { beatId?: string }) {
           error.code === "23505" ? "Já existe um beat com esse nome. Escolha outro título." : error.message,
         );
       }
+      saved = true;
 
-      // Arquivos antigos que foram substituídos.
+      // Apaga do armazenamento os arquivos antigos que foram substituídos ou removidos.
       if (existing) {
-        await Promise.all([
-          uploaded.cover && removeFiles("covers", [pathFromPublicUrl("covers", existing.cover_url)]),
-          uploaded.preview && removeFiles("previews", [pathFromPublicUrl("previews", existing.preview_url)]),
-          removeFiles("masters", [
-            uploaded.mp3 ? existing.mp3_path : null,
-            uploaded.wav ? existing.wav_path : null,
-            uploaded.stems ? existing.stems_path : null,
-          ]),
-        ]);
+        await Promise.all(
+          FILE_FIELDS.filter(({ key }) => uploaded[key] || removed[key]).map((field) =>
+            removeFiles(field.bucket, [storedPath(field)]),
+          ),
+        );
       }
 
       await refreshCatalog();
       router.push("/admin");
     } catch (err) {
+      // Não deixa arquivo órfão se o banco não chegou a salvar.
+      if (!saved) {
+        await Promise.all(
+          FILE_FIELDS.filter(({ key }) => uploaded[key]).map(({ key, bucket }) =>
+            removeFiles(bucket, [uploaded[key]!]),
+          ),
+        );
+      }
       setError(err instanceof Error ? err.message : String(err));
       setStatus("");
     }
@@ -200,23 +226,21 @@ export function BeatForm({ beatId }: { beatId?: string }) {
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Arquivos</h2>
-        {FILE_FIELDS.map(({ key, label, accept, hint }) => (
-          <div key={key} className="rounded-xl border border-white/10 p-4">
-            <Field
-              label={label}
-              hint={currentFile[key] ? `${hint} Já enviado — escolha outro para substituir.` : hint}
-            >
-              <input
-                type="file"
-                accept={accept}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  setFiles((f) => ({ ...f, [key]: file }));
-                }}
-                className="block w-full text-sm text-zinc-400 file:mr-4 file:rounded-lg file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-white/15"
-              />
-            </Field>
-          </div>
+        {FILE_FIELDS.map((field) => (
+          <FileSlot
+            key={field.key}
+            field={field}
+            current={existing?.[COLUMN[field.key]] ?? null}
+            selected={files[field.key]}
+            removed={!!removed[field.key]}
+            disabled={!!status}
+            onSelect={(file) => {
+              setFiles((f) => ({ ...f, [field.key]: file }));
+              setRemoved((r) => ({ ...r, [field.key]: false }));
+            }}
+            onClear={() => setFiles((f) => ({ ...f, [field.key]: undefined }))}
+            onRemove={(value) => setRemoved((r) => ({ ...r, [field.key]: value }))}
+          />
         ))}
       </section>
 
@@ -236,6 +260,102 @@ export function BeatForm({ beatId }: { beatId?: string }) {
         </Button>
       </div>
     </form>
+  );
+}
+
+function FileSlot({
+  field,
+  current,
+  selected,
+  removed,
+  disabled,
+  onSelect,
+  onClear,
+  onRemove,
+}: {
+  field: FileField;
+  current: string | null;
+  selected: File | undefined;
+  removed: boolean;
+  disabled: boolean;
+  onSelect: (file: File) => void;
+  onClear: () => void;
+  onRemove: (removed: boolean) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const hasCurrent = !!current && !removed;
+  const canRemove = hasCurrent && !selected && !field.required;
+
+  let state: React.ReactNode;
+  if (selected) {
+    state = (
+      <>
+        <span className="text-accent">Novo:</span> {selected.name}
+        <span className="text-zinc-500">
+          {" "}
+          · {(selected.size / 1024 / 1024).toFixed(1)} MB · {current ? "vai substituir o atual" : "será enviado"} ao salvar
+        </span>
+      </>
+    );
+  } else if (removed) {
+    state = <span className="text-red-300">Será removido ao salvar</span>;
+  } else if (current) {
+    state = (
+      <>
+        <span className="text-zinc-400">Atual:</span>{" "}
+        {field.bucket === "masters" ? (
+          displayName(current)
+        ) : (
+          <a href={current} target="_blank" rel="noreferrer" className="underline hover:text-accent">
+            {displayName(current)}
+          </a>
+        )}
+      </>
+    );
+  } else {
+    state = <span className="text-zinc-500">Nenhum arquivo</span>;
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">
+            {field.label}
+            {field.required && <span className="text-accent"> *</span>}
+          </p>
+          <p className="text-xs text-zinc-500">{field.hint}</p>
+          <p className="mt-2 truncate text-sm">{state}</p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          {selected || removed ? (
+            <Button variant="ghost" disabled={disabled} onClick={() => (selected ? onClear() : onRemove(false))}>
+              Desfazer
+            </Button>
+          ) : (
+            <Button variant="ghost" disabled={disabled} onClick={() => inputRef.current?.click()}>
+              {current ? "Substituir" : "Escolher arquivo"}
+            </Button>
+          )}
+          {canRemove && (
+            <Button variant="danger" disabled={disabled} onClick={() => onRemove(true)}>
+              Remover
+            </Button>
+          )}
+        </div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={field.accept}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onSelect(file);
+          e.target.value = ""; // permite escolher o mesmo arquivo de novo
+        }}
+      />
+    </div>
   );
 }
 
