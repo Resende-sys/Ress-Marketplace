@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BeatHero } from "@/components/beat-hero";
-import { getBeat, getBeats, getLicenses } from "@/lib/catalog";
+import { getBeat, getLicenses } from "@/lib/catalog";
 
-export async function generateStaticParams() {
-  const beats = await getBeats();
-  return beats.map((b) => ({ slug: b.slug }));
-}
+// Sempre busca os dados atuais do banco.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: PageProps<"/beats/[slug]">): Promise<Metadata> {
   const { slug } = await params;

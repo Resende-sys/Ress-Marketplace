@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { refreshCatalog } from "@/app/actions";
 import { getSupabase } from "@/lib/supabase-browser";
 import { Button, Field, inputClass } from "./ui";
 
@@ -69,7 +68,6 @@ function LicenseCard({ row }: { row: Row }) {
       })
       .eq("id", row.id);
     if (error) return setStatus(error.message);
-    await refreshCatalog();
     setStatus("saved");
   }
 

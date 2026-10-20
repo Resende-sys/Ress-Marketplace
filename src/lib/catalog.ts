@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { cacheLife, cacheTag } from "next/cache";
+import { cache } from "react";
 import { demoBeats, demoLicenses } from "./demo-data";
 import type { Beat, License } from "./types";
 
@@ -36,11 +36,8 @@ type LicenseRow = {
 
 // Se o Supabase ainda não estiver configurado (ou o schema.sql não foi
 // rodado), o site mostra os beats de demonstração em vez de quebrar.
-export async function getBeats(): Promise<Beat[]> {
-  "use cache";
-  cacheLife("minutes");
-  cacheTag("catalog");
-
+// `cache` evita repetir a mesma consulta dentro de um único acesso à página.
+export const getBeats = cache(async (): Promise<Beat[]> => {
   const db = supabase();
   if (!db) return demoBeats;
 
@@ -68,13 +65,9 @@ export async function getBeats(): Promise<Beat[]> {
     coverUrl: b.cover_url,
     previewUrl: b.preview_url,
   }));
-}
+});
 
-export async function getLicenses(): Promise<License[]> {
-  "use cache";
-  cacheLife("minutes");
-  cacheTag("catalog");
-
+export const getLicenses = cache(async (): Promise<License[]> => {
   const db = supabase();
   if (!db) return demoLicenses;
 
@@ -99,7 +92,7 @@ export async function getLicenses(): Promise<License[]> {
     limits: l.limits,
     isExclusive: l.is_exclusive,
   }));
-}
+});
 
 export async function getBeat(slug: string) {
   const beats = await getBeats();

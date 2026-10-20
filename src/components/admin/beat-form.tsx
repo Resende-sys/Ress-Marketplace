@@ -2,11 +2,9 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { refreshCatalog } from "@/app/actions";
 import {
   type Bucket,
   displayName,
-  MAX_UPLOAD_BYTES,
   pathFromPublicUrl,
   publicUrl,
   removeFiles,
@@ -107,9 +105,6 @@ export function BeatForm({ beatId }: { beatId?: string }) {
     e.preventDefault();
     setError("");
 
-    const tooBig = Object.values(files).find((f) => f.size > MAX_UPLOAD_BYTES);
-    if (tooBig) return setError(`"${tooBig.name}" passa de 50 MB (limite do plano grátis do Supabase).`);
-
     const missingRequired = FILE_FIELDS.find(
       (f) => f.required && !files[f.key] && (!existing || removed[f.key]),
     );
@@ -124,8 +119,11 @@ export function BeatForm({ beatId }: { beatId?: string }) {
       for (const { key, bucket, label } of FILE_FIELDS) {
         const file = files[key];
         if (!file) continue;
-        setStatus(`Enviando ${label.toLowerCase()}…`);
-        uploaded[key] = await uploadFile(bucket, slug, key, file);
+        const name = label.toLowerCase();
+        setStatus(`Enviando ${name}…`);
+        uploaded[key] = await uploadFile(bucket, slug, key, file, (p) =>
+          setStatus(`Enviando ${name}… ${Math.floor(p * 100)}%`),
+        );
       }
 
       setStatus("Salvando…");
@@ -169,7 +167,6 @@ export function BeatForm({ beatId }: { beatId?: string }) {
         );
       }
 
-      await refreshCatalog();
       router.push("/admin");
     } catch (err) {
       // Não deixa arquivo órfão se o banco não chegou a salvar.

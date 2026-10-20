@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ress-marketplace",
+  // worker.ts = site (gerado pelo OpenNext) + "despertador" diário do Supabase.
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // Todo dia às 09:17 UTC consulta o banco para o Supabase grátis não pausar.
+  "triggers": {
+    "crons": ["17 9 * * *"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

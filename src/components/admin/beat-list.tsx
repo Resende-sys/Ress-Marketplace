@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { refreshCatalog } from "@/app/actions";
 import { pathFromPublicUrl, removeFiles } from "@/lib/admin-storage";
 import { getSupabase } from "@/lib/supabase-browser";
 import { Button } from "./ui";
@@ -42,7 +41,6 @@ export function BeatList() {
   async function togglePublished(row: Row) {
     const { error } = await getSupabase().from("beats").update({ published: !row.published }).eq("id", row.id);
     if (error) return setError(error.message);
-    await refreshCatalog();
     await load();
   }
 
@@ -55,7 +53,6 @@ export function BeatList() {
       removeFiles("previews", [pathFromPublicUrl("previews", row.preview_url)]),
       removeFiles("masters", [row.mp3_path, row.wav_path, row.stems_path]),
     ]);
-    await refreshCatalog();
     await load();
   }
 

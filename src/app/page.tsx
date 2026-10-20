@@ -3,6 +3,9 @@ import { getBeats, getLicenses } from "@/lib/catalog";
 import { formatPrice } from "@/lib/format";
 import { site } from "@/lib/site";
 
+// Sempre busca os dados atuais do banco.
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const [beats, licenses] = await Promise.all([getBeats(), getLicenses()]);
   const prices = licenses.filter((l) => !l.isExclusive).map((l) => l.priceCents);

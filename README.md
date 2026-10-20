@@ -1,36 +1,34 @@
 # RESS Beats — loja de beats
 
-Site para vender meus beats com licenças (Básica, Premium, Trackout, Exclusiva), no estilo BeatStars, mas só com o meu catálogo.
+Site para vender meus beats com licenças (Básica, Premium, Trackout, Exclusiva), no estilo BeatStars, mas só com o meu catálogo — com Pix e preço em reais.
 
-Feito com **Next.js** (site) + **Supabase** (banco de dados e arquivos).
+Feito com **Next.js**, hospedado na **Cloudflare** (Workers + R2), com **Supabase** para banco de dados e login.
 
 ## O que já funciona
 - Catálogo com busca e filtros por gênero e mood
 - Player fixo no rodapé (continua tocando enquanto navega)
 - Página de cada beat com escolha de licença
 - Seção de licenças com preços
-- Painel admin em `/admin`: login, upload de beats (prévia, capa, MP3, WAV, stems), publicar/ocultar, editar preços das licenças
+- Painel admin em `/admin`: login, upload de beats (prévia, capa, MP3, WAV, stems — **sem limite de 50 MB**, com barra de progresso e envio em partes para arquivos grandes), substituir/remover arquivos, publicar/ocultar, editar preços das licenças
+- "Despertador" diário que impede o Supabase grátis de pausar
 
 ## Próximas etapas
 1. Checkout (Mercado Pago / Pix) e entrega automática por e-mail com contrato em PDF
-2. Publicação na Vercel com domínio próprio
+2. Envio em lote dos beats antigos
+3. Domínio próprio
 
-## Configurar o banco (uma vez)
-1. Supabase → **SQL Editor** → **New query**
-2. Cole o conteúdo de [`supabase/schema.sql`](supabase/schema.sql) e clique em **Run**
+## Configuração
+1. **Banco (Supabase), uma vez:** SQL Editor → rode [`supabase/schema.sql`](supabase/schema.sql); crie seu usuário em Authentication → Users → Add user (marque *Auto Confirm User*); rode [`supabase/002_admin.sql`](supabase/002_admin.sql) trocando `SEU_EMAIL_AQUI` pelo seu e-mail.
+2. **Hospedagem e arquivos (Cloudflare):** siga o passo a passo em [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md).
 
-Isso cria as tabelas de beats e licenças, com 4 beats de exemplo. Depois:
-
-3. Authentication → Users → **Add user** → **Create new user** (marque *Auto Confirm User*)
-4. Rode [`supabase/002_admin.sql`](supabase/002_admin.sql) trocando `SEU_EMAIL_AQUI` pelo e-mail do passo 3
-
-Isso libera o painel `/admin` só para você e cria as pastas de arquivos (a de masters/stems é privada). Enquanto o banco não está configurado, o site mostra os mesmos beats de demonstração.
-
-## Rodar localmente (para desenvolvedores)
+## Para desenvolvedores
 ```bash
-cp .env.example .env.local   # preencha com a URL e a publishable key do Supabase
 npm install
-npm run dev                  # http://localhost:3000
+npm run dev        # http://localhost:3000 (Next.js normal)
+npm run preview    # build da Cloudflare rodando localmente
+npm run deploy     # publica na Cloudflare (precisa de login no wrangler)
 ```
 
-Nome e textos da marca ficam em `src/lib/site.ts`; a cor de destaque em `src/app/globals.css` (`--accent`).
+- Variáveis públicas: `.env.production` (versionado). Para desenvolvimento local, crie `.env.local` (veja `.env.example`).
+- Segredos do R2 (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`): no painel da Cloudflare, ou em `.dev.vars` localmente.
+- Nome e textos da marca: `src/lib/site.ts`; cor de destaque: `src/app/globals.css` (`--accent`).
