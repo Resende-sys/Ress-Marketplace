@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Cover } from "@/components/cover";
 import { pathFromPublicUrl, removeFiles } from "@/lib/admin-storage";
 import { getSupabase } from "@/lib/supabase-browser";
-import { Button } from "./ui";
+import { AdminTitle, Button, ErrorBox } from "./ui";
 
 type Row = {
   id: string;
@@ -12,7 +13,9 @@ type Row = {
   title: string;
   bpm: number;
   genre: string;
+  plays: number;
   published: boolean;
+  catalog_id: string | null;
   cover_url: string | null;
   preview_url: string;
   mp3_path: string | null;
@@ -22,21 +25,32 @@ type Row = {
 
 export function BeatList() {
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [catalogs, setCatalogs] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await getSupabase()
-      .from("beats")
-      .select("id, slug, title, bpm, genre, published, cover_url, preview_url, mp3_path, wav_path, stems_path")
-      .order("created_at", { ascending: false });
-    if (error) setError(error.message);
-    else setRows(data);
+    const [beats, cats] = await Promise.all([
+      getSupabase()
+        .from("beats")
+        .select("id, slug, title, bpm, genre, plays, published, catalog_id, cover_url, preview_url, mp3_path, wav_path, stems_path")
+        .order("created_at", { ascending: false }),
+      getSupabase().from("catalogs").select("id, name"),
+    ]);
+    if (beats.error) setError(beats.error.message);
+    else setRows(beats.data as Row[]);
+    setCatalogs(Object.fromEntries((cats.data ?? []).map((c) => [c.id, c.name])));
   }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial
     void load();
   }, [load]);
+
+  const visible = useMemo(
+    () => (rows ?? []).filter((r) => !filter || r.title.toLowerCase().includes(filter.toLowerCase())),
+    [rows, filter],
+  );
 
   async function togglePublished(row: Row) {
     const { error } = await getSupabase().from("beats").update({ published: !row.published }).eq("id", row.id);
@@ -58,49 +72,47 @@ export function BeatList() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Seus beats</h1>
-        <Link
-          href="/admin/beats/novo"
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-black hover:brightness-110"
-        >
-          + Novo beat
-        </Link>
-      </div>
-
-      {error && <p className="mb-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+      <AdminTitle eyebrow={rows ? `${rows.length} beats` : "Beats"} title="Seus beats" action={{ href: "/admin/beats/novo", label: "+ Novo beat" }} />
+      {error && <div className="mb-4"><ErrorBox>{error}</ErrorBox></div>}
 
       {rows === null ? (
-        <p className="text-zinc-400">Carregando…</p>
+        <p className="text-muted">Carregando…</p>
       ) : rows.length === 0 ? (
-        <p className="py-12 text-center text-zinc-400">Nenhum beat ainda. Clique em “Novo beat”.</p>
+        <p className="panel py-12 text-center text-muted">Nenhum beat ainda. Clique em “Novo beat”.</p>
       ) : (
-        <ul className="divide-y divide-white/5 rounded-xl border border-white/10">
-          {rows.map((row) => (
-            <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold">{row.title}</p>
-                <p className="text-sm text-zinc-400">
-                  {row.bpm} BPM · {row.genre}
-                </p>
-              </div>
-              <div className="flex gap-1.5 text-xs">
-                <FileBadge ok={!!row.mp3_path}>MP3</FileBadge>
-                <FileBadge ok={!!row.wav_path}>WAV</FileBadge>
-                <FileBadge ok={!!row.stems_path}>Stems</FileBadge>
-              </div>
-              <Button variant="ghost" onClick={() => togglePublished(row)} className="w-32">
-                {row.published ? "● Publicado" : "○ Oculto"}
-              </Button>
-              <Link href={`/admin/beats/${row.id}`} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/15">
-                Editar
-              </Link>
-              <Button variant="danger" onClick={() => remove(row)}>
-                Apagar
-              </Button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <input className="field mb-4 max-w-sm" placeholder="Buscar beat…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <ul className="panel divide-y divide-line">
+            {visible.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
+                <Cover src={row.cover_url} seed={row.slug} label={row.title} className="size-12 shrink-0 rounded-lg" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold uppercase">{row.title}</p>
+                  <p className="label mt-0.5 truncate !text-[0.58rem] !tracking-[0.14em]">
+                    {row.bpm} BPM · {row.genre} · {row.catalog_id ? catalogs[row.catalog_id] ?? "—" : "Sem catálogo"} · {row.plays} plays
+                  </p>
+                </div>
+                <div className="flex gap-1.5">
+                  <FileBadge ok={!!row.mp3_path}>MP3</FileBadge>
+                  <FileBadge ok={!!row.wav_path}>WAV</FileBadge>
+                  <FileBadge ok={!!row.stems_path}>Stems</FileBadge>
+                </div>
+                <div className="flex w-full gap-2 sm:w-auto">
+                  <Button variant="ghost" onClick={() => togglePublished(row)} className="flex-1 !px-3 !py-2 sm:flex-none">
+                    <span className={`size-2 rounded-full ${row.published ? "bg-accent shadow-[0_0_8px_var(--glow)]" : "bg-dim"}`} />
+                    {row.published ? "Publicado" : "Oculto"}
+                  </Button>
+                  <Link href={`/admin/beats/${row.id}`} className="btn btn-ghost flex-1 !px-3 !py-2 sm:flex-none">
+                    Editar
+                  </Link>
+                  <Button variant="danger" onClick={() => remove(row)} className="!px-3 !py-2">
+                    Apagar
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
@@ -110,7 +122,9 @@ function FileBadge({ ok, children }: { ok: boolean; children: React.ReactNode })
   return (
     <span
       title={ok ? "Arquivo enviado" : "Falta enviar"}
-      className={`rounded-full px-2 py-0.5 ${ok ? "bg-accent/15 text-accent" : "bg-white/5 text-zinc-500 line-through"}`}
+      className={`rounded-full border px-2 py-0.5 font-mono text-[0.58rem] tracking-[0.1em] uppercase ${
+        ok ? "border-accent/50 bg-accent/10 text-accent-hi" : "border-line text-dim line-through"
+      }`}
     >
       {children}
     </span>

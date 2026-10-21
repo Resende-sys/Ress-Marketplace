@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase-browser";
-import { Button, Field, inputClass } from "./ui";
+import { AdminTitle, Button, centsToInput, ErrorBox, Field, parsePrice, splitList, Toggle } from "./ui";
 
 type Row = {
   id: string;
@@ -12,6 +12,7 @@ type Row = {
   files: string[];
   limits: string[];
   is_exclusive: boolean;
+  featured: boolean;
 };
 
 export function LicenseEditor() {
@@ -21,18 +22,17 @@ export function LicenseEditor() {
   useEffect(() => {
     getSupabase()
       .from("licenses")
-      .select("id, name, description, price_cents, files, limits, is_exclusive")
+      .select("id, name, description, price_cents, files, limits, is_exclusive, featured")
       .order("sort_order")
-      .then(({ data, error }) => (error ? setError(error.message) : setRows(data)));
+      .then(({ data, error }) => (error ? setError(error.message) : setRows(data as Row[])));
   }, []);
 
   return (
     <div>
-      <h1 className="mb-2 text-2xl font-bold">Licenças</h1>
-      <p className="mb-6 text-sm text-zinc-400">Os preços valem para todos os beats.</p>
-      {error && <p className="mb-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+      <AdminTitle eyebrow="Valem para todos os beats" title="Licenças" />
+      {error && <ErrorBox>{error}</ErrorBox>}
       {rows === null ? (
-        <p className="text-zinc-400">Carregando…</p>
+        <p className="text-muted">Carregando…</p>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {rows.map((row) => (
@@ -47,15 +47,16 @@ export function LicenseEditor() {
 function LicenseCard({ row }: { row: Row }) {
   const [name, setName] = useState(row.name);
   const [description, setDescription] = useState(row.description ?? "");
-  const [price, setPrice] = useState((row.price_cents / 100).toFixed(2).replace(".", ","));
+  const [price, setPrice] = useState(centsToInput(row.price_cents));
   const [files, setFiles] = useState(row.files.join(", "));
   const [limits, setLimits] = useState(row.limits.join("\n"));
+  const [featured, setFeatured] = useState(row.featured);
   const [status, setStatus] = useState<"" | "saving" | "saved" | string>("");
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const cents = Math.round(Number(price.replace(/\./g, "").replace(",", ".")) * 100);
-    if (!Number.isFinite(cents) || cents < 0) return setStatus("Preço inválido.");
+    const cents = parsePrice(price);
+    if (cents == null) return setStatus("Preço inválido.");
     setStatus("saving");
     const { error } = await getSupabase()
       .from("licenses")
@@ -63,47 +64,40 @@ function LicenseCard({ row }: { row: Row }) {
         name: name.trim(),
         description: description.trim() || null,
         price_cents: cents,
-        files: files.split(",").map((f) => f.trim()).filter(Boolean),
+        files: splitList(files),
         limits: limits.split("\n").map((l) => l.trim()).filter(Boolean),
+        featured,
       })
       .eq("id", row.id);
-    if (error) return setStatus(error.message);
-    setStatus("saved");
+    setStatus(error ? error.message : "saved");
   }
 
   return (
-    <form onSubmit={save} className="space-y-3 rounded-xl border border-white/10 p-5">
+    <form onSubmit={save} className={`panel space-y-4 p-5 sm:p-6 ${featured ? "hud border-accent/50" : ""}`}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Nome">
-          <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+          <input required value={name} onChange={(e) => setName(e.target.value)} className="field" />
         </Field>
         <Field label="Preço (R$)" hint={row.is_exclusive ? "Exclusiva aparece como “Sob consulta”." : undefined}>
-          <input
-            required
-            inputMode="decimal"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            className={inputClass}
-          />
+          <input required inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} className="field" />
         </Field>
       </div>
       <Field label="Descrição">
-        <input value={description} onChange={(e) => setDescription(e.target.value)} className={inputClass} />
+        <input value={description} onChange={(e) => setDescription(e.target.value)} className="field" />
       </Field>
       <Field label="Arquivos entregues" hint="Separe por vírgula: MP3, WAV, Stems">
-        <input value={files} onChange={(e) => setFiles(e.target.value)} className={inputClass} />
+        <input value={files} onChange={(e) => setFiles(e.target.value)} className="field" />
       </Field>
-      <Field label="Limites / benefícios" hint="Um por linha">
-        <textarea rows={3} value={limits} onChange={(e) => setLimits(e.target.value)} className={inputClass} />
+      <Field label="Limites / termos de uso" hint="Um por linha. Aparecem na escolha da licença.">
+        <textarea rows={4} value={limits} onChange={(e) => setLimits(e.target.value)} className="field" />
       </Field>
+      <Toggle checked={featured} onChange={setFeatured} label="Destacar como “Mais popular”" />
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={status === "saving"}>
           {status === "saving" ? "Salvando…" : "Salvar"}
         </Button>
-        {status === "saved" && <span className="text-sm text-accent">Salvo ✓</span>}
-        {status && status !== "saving" && status !== "saved" && (
-          <span className="text-sm text-red-300">{status}</span>
-        )}
+        {status === "saved" && <span className="text-sm text-accent-hi">Salvo ✓</span>}
+        {status && status !== "saving" && status !== "saved" && <span className="text-sm text-accent-hi">{status}</span>}
       </div>
     </form>
   );
